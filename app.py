@@ -26,13 +26,26 @@ def render_header(icon_path, title):
         st.markdown(f"### {title}")
 
 def main():
+    query_params = st.query_params
+    if "code" in query_params:
+        from src.strava_api import exchange_token
+        code = query_params["code"]
+        st.success("Authorization code received! Exchanging for token...")
+        token_data = exchange_token(code)
+        if token_data and 'access_token' in token_data:
+            st.session_state['strava_access_token'] = token_data['access_token']
+            st.success("Successfully connected to Strava API!")
+            st.query_params.clear()
+        else:
+            st.error("Failed to exchange token.")
+
     if os.path.exists("Icons/App_Header.jpeg"):
         st.image("Icons/App_Header.jpeg", use_container_width=True)
         
     st.title("Strava AI Local Analyzer")
     st.sidebar.title("Navigation")
     
-    page = st.sidebar.radio("Go to", ["Single Route", "Trends", "Personal Records", "AI Coach", "Upload Data"])
+    page = st.sidebar.radio("Go to", ["Single Route", "Trends", "Personal Records", "AI Coach", "Data & Sync"])
     
     data_path = "data/processed_activities.csv"
     
@@ -320,8 +333,83 @@ def main():
         else:
             st.warning("No data found.")
             
-    elif page == "Upload Data":
-        st.header("Upload Strava Archive")
+    elif page == "Data & Sync":
+        st.header("Data & API Sync")
+        
+        st.subheader("1. Live Strava API Connection")
+        if 'strava_access_token' not in st.session_state:
+            from src.strava_api import get_auth_url
+            auth_url = get_auth_url()
+            if auth_url:
+                st.markdown(f'<a href="{auth_url}" target="_self"><button style="background-color:#fc4c02; color:white; padding:10px; border-radius:5px; border:none; cursor:pointer;">Connect to Strava</button></a>', unsafe_allow_html=True)
+            else:
+                st.error("Strava API credentials not found in .env file.")
+        else:
+            st.success("✅ Connected to Strava API")
+            if st.button("Sync Recent Activities"):
+                from src.strava_api import fetch_recent_activities, fetch_activity_streams, streams_to_dataframe
+                with st.spinner("Fetching recent activities..."):
+                    activities = fetch_recent_activities(st.session_state['strava_access_token'])
+                    st.write(f"Found {len(activities)} recent activities.")
+                    
+                    if os.path.exists(data_path):
+                        df = pd.read_csv(data_path)
+                        existing_ids = set(df['id'].astype(str))
+                    else:
+                        df = pd.DataFrame()
+                        existing_ids = set()
+                        
+                    new_rows = []
+                    
+                    for act in activities:
+                        act_id = str(act['id'])
+                        if act_id not in existing_ids:
+                            st.write(f"Downloading stream for new activity: {act['name']}")
+                            streams = fetch_activity_streams(act_id, st.session_state['strava_access_token'])
+                            stream_df = streams_to_dataframe(streams)
+                            
+                            if not stream_df.empty:
+                                raw_dir = "data/raw"
+                                os.makedirs(raw_dir, exist_ok=True)
+                                save_path = os.path.join(raw_dir, f"{act_id}_api.csv")
+                                stream_df.to_csv(save_path, index=False)
+                                
+                                # Map Strava API activity summary format to our CSV format
+                                new_row = {
+                                    'id': act_id,
+                                    'name': act['name'],
+                                    'distance': act.get('distance', 0),
+                                    'moving_time': act.get('moving_time', 0),
+                                    'elapsed_time': act.get('elapsed_time', 0),
+                                    'elevation_gain': act.get('total_elevation_gain', 0),
+                                    'type': act.get('type', ''),
+                                    'activity_date': act.get('start_date_local', ''),
+                                    'average_speed': act.get('average_speed', 0),
+                                    'max_speed': act.get('max_speed', 0),
+                                    'average_watts': act.get('average_watts', 0),
+                                    'max_watts': act.get('max_watts', 0),
+                                    'average_heart_rate': act.get('average_heartrate', 0),
+                                    'max_heart_rate': act.get('max_heartrate', 0),
+                                    'local_raw_path': save_path
+                                }
+                                new_rows.append(new_row)
+                                
+                    if new_rows:
+                        new_df = pd.DataFrame(new_rows)
+                        df = pd.concat([df, new_df], ignore_index=True)
+                        df.to_csv(data_path, index=False)
+                        st.success(f"Successfully synced {len(new_rows)} new activities!")
+                        
+                        # Trigger global records update
+                        from src.data_processing import scan_global_records
+                        st.info("Updating Global Records with new data...")
+                        scan_global_records(data_path, "data/global_records.json")
+                        st.success("Global Records Updated!")
+                    else:
+                        st.info("No new activities to sync.")
+                        
+        st.markdown("---")
+        st.subheader("2. Historical Bulk Upload")
         st.write("Upload your full Strava export `.zip` file.")
         
         uploaded_file = st.file_uploader("Choose a ZIP file", type="zip")
