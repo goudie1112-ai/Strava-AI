@@ -1,0 +1,12 @@
+streamlit
+pandas
+plotly
+folium
+streamlit-folium
+stravalib
+python-dotenv
+polyline
+numpy
+fitparse
+gpxpy
+google-genai
