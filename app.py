@@ -6,7 +6,7 @@ st.set_page_config(page_title="Strava AI Analyzer", page_icon="🚴‍♂️", l
 
 from src.visualizations import plot_route, plot_hr_zones, plot_hr_curve, plot_power_curve, plot_power_zones, plot_pedal_dynamics, plot_speed, plot_elevation, plot_cadence
 from src.data_processing import process_zip_export, parse_fit_file
-from src.trends import plot_weekly_distance, plot_weekly_elevation
+from src.trends import plot_weekly_distance, plot_weekly_elevation, plot_activity_heatmap, plot_ytd_comparison, plot_activity_breakdown, calculate_eddington, plot_fitness_fatigue, plot_suffer_score
 from src.records import get_power_records
 from src.ai_insights import get_ai_coaching
 
@@ -48,7 +48,7 @@ def main():
         
     st.sidebar.title("Navigation")
     
-    page = st.sidebar.radio("Go to", ["Single Route", "Trends", "Personal Records", "AI Coach", "Data & Sync"])
+    page = st.sidebar.radio("Go to", ["Single Route", "Trends", "Personal Records", "AI Coach", "Data & Sync"], key="page_selector")
     
     data_path = "data/processed_activities.csv"
     
@@ -64,7 +64,8 @@ def main():
                 activity_id = st.selectbox(
                     "Select Activity", 
                     df['id'].astype(str).tolist(), 
-                    format_func=lambda x: f"{name_map.get(x)} - {x}"
+                    format_func=lambda x: f"{name_map.get(x)} - {x}",
+                    key="selected_activity_id"
                 )
                 activity_data = df[df['id'].astype(str) == activity_id].iloc[0]
                 
@@ -163,7 +164,7 @@ def main():
             st.warning("No data found. Please go to 'Upload Data'.")
             
     elif page == "Trends":
-        st.header("Aggregated Trends")
+        render_header("Icons/Trends_icon.jpeg", "Aggregated Trends")
         if os.path.exists(data_path):
             df = pd.read_csv(data_path)
             
@@ -177,6 +178,13 @@ def main():
             elif timescale == "Last Year":
                 df = df[df['date'] >= now - pd.DateOffset(years=1)]
                 
+            # Top Level Metrics
+            eddington = calculate_eddington(df)
+            if eddington > 0:
+                st.metric("Cycling Eddington Number", f"E{eddington}", help=f"You have ridden at least {eddington}km on {eddington} different days.")
+                st.markdown("---")
+                
+            # Row 1: Weekly Distance & Elevation
             col1, col2 = st.columns(2)
             with col1:
                 fig1 = plot_weekly_distance(df)
@@ -184,63 +192,98 @@ def main():
             with col2:
                 fig2 = plot_weekly_elevation(df)
                 if fig2: st.plotly_chart(fig2, use_container_width=True)
+                
+            # Row 2: Heatmap & Breakdown
+            col3, col4 = st.columns([2, 1])
+            with col3:
+                fig_hm = plot_activity_heatmap(df)
+                if fig_hm: st.plotly_chart(fig_hm, use_container_width=True)
+            with col4:
+                fig_bd = plot_activity_breakdown(df)
+                if fig_bd: st.plotly_chart(fig_bd, use_container_width=True)
+                
+            # Row 3: PMC & Suffer Score
+            st.markdown("### Training Load")
+            col5, col6 = st.columns(2)
+            with col5:
+                fig_pmc = plot_fitness_fatigue(df)
+                if fig_pmc: st.plotly_chart(fig_pmc, use_container_width=True)
+            with col6:
+                fig_ss = plot_suffer_score(df)
+                if fig_ss: st.plotly_chart(fig_ss, use_container_width=True)
+                
+            # Row 4: YTD
+            st.markdown("### Year-to-Date Progress")
+            fig_ytd = plot_ytd_comparison(df)
+            if fig_ytd: st.plotly_chart(fig_ytd, use_container_width=True)
         else:
             st.warning("No data found.")
             
     elif page == "Personal Records":
-        st.header("Personal Records")
+        render_header("Icons/Records_icon.jpeg", "Personal Records")
         if os.path.exists(data_path):
             df = pd.read_csv(data_path)
             if not df.empty:
-                st.subheader("All-Time Highs (from Activity Summaries)")
+                st.subheader("Activity Summary Highs")
+                
+                df['date'] = pd.to_datetime(df['activity_date'], errors='coerce')
+                years = [str(int(y)) for y in df['date'].dt.year.dropna().unique()]
+                years.sort(reverse=True)
+                options = ["All Time"] + years
+                selected_timescale = st.selectbox("Filter Records By Year", options, key="records_timescale")
+                
+                df_ride = df[df['activity_type'].isin(['Ride', 'Virtual Ride'])].copy()
+                
+                if selected_timescale != "All Time":
+                    df_ride = df_ride[df_ride['date'].dt.year == int(selected_timescale)]
                 
                 col1, col2, col3 = st.columns(3)
                 
                 # Distance
-                if 'distance' in df.columns:
-                    df['distance_numeric'] = pd.to_numeric(df['distance'], errors='coerce')
-                    if not df['distance_numeric'].isna().all():
-                        max_dist_idx = df['distance_numeric'].idxmax()
+                if 'distance' in df_ride.columns:
+                    df_ride['distance_numeric'] = pd.to_numeric(df_ride['distance'], errors='coerce')
+                    if not df_ride['distance_numeric'].isna().all():
+                        max_dist_idx = df_ride['distance_numeric'].idxmax()
                         if pd.notna(max_dist_idx):
-                            max_dist = df.loc[max_dist_idx]
-                            col1.metric("Longest Ride", f"{max_dist['distance_numeric']*0.001:.2f} km", f"{max_dist.get('name', 'Activity')}")
+                            max_dist = df_ride.loc[max_dist_idx]
+                            col1.metric("Longest Ride", f"{max_dist['distance_numeric']:.2f} km", f"{max_dist.get('name', 'Activity')}")
                 
                 # Elevation
-                if 'elevation_gain' in df.columns:
-                    df['elevation_numeric'] = pd.to_numeric(df['elevation_gain'], errors='coerce')
-                    if not df['elevation_numeric'].isna().all():
-                        max_elev_idx = df['elevation_numeric'].idxmax()
+                if 'elevation_gain' in df_ride.columns:
+                    df_ride['elevation_numeric'] = pd.to_numeric(df_ride['elevation_gain'], errors='coerce')
+                    if not df_ride['elevation_numeric'].isna().all():
+                        max_elev_idx = df_ride['elevation_numeric'].idxmax()
                         if pd.notna(max_elev_idx):
-                            max_elev = df.loc[max_elev_idx]
+                            max_elev = df_ride.loc[max_elev_idx]
                             col2.metric("Most Elevation Gain", f"{max_elev['elevation_numeric']:.0f} m", f"{max_elev.get('name', 'Activity')}")
                 
                 # Speed
-                if 'max_speed' in df.columns:
-                    df['max_speed_numeric'] = pd.to_numeric(df['max_speed'], errors='coerce')
-                    if not df['max_speed_numeric'].isna().all():
-                        max_speed_idx = df['max_speed_numeric'].idxmax()
+                if 'max_speed' in df_ride.columns:
+                    df_ride['max_speed_numeric'] = pd.to_numeric(df_ride['max_speed'], errors='coerce')
+                    if not df_ride['max_speed_numeric'].isna().all():
+                        max_speed_idx = df_ride['max_speed_numeric'].idxmax()
                         if pd.notna(max_speed_idx):
-                            max_speed = df.loc[max_speed_idx]
+                            max_speed = df_ride.loc[max_speed_idx]
                             col3.metric("Highest Max Speed", f"{max_speed['max_speed_numeric']*3.6:.1f} km/h", f"{max_speed.get('name', 'Activity')}")
                         
                 col4, col5, col6 = st.columns(3)
                 
                 # Avg Power
-                if 'average_watts' in df.columns:
-                    df['avg_watts_numeric'] = pd.to_numeric(df['average_watts'], errors='coerce')
-                    if not df['avg_watts_numeric'].isna().all():
-                        max_avg_power_idx = df['avg_watts_numeric'].idxmax()
+                if 'average_watts' in df_ride.columns:
+                    df_ride['avg_watts_numeric'] = pd.to_numeric(df_ride['average_watts'], errors='coerce')
+                    if not df_ride['avg_watts_numeric'].isna().all():
+                        max_avg_power_idx = df_ride['avg_watts_numeric'].idxmax()
                         if pd.notna(max_avg_power_idx):
-                            max_avg_power = df.loc[max_avg_power_idx]
+                            max_avg_power = df_ride.loc[max_avg_power_idx]
                             col4.metric("Highest Avg Power", f"{max_avg_power['avg_watts_numeric']:.0f} W", f"{max_avg_power.get('name', 'Activity')}")
                         
                 # Max Power
-                if 'max_watts' in df.columns:
-                    df['max_watts_numeric'] = pd.to_numeric(df['max_watts'], errors='coerce')
-                    if not df['max_watts_numeric'].isna().all():
-                        max_pwr_idx = df['max_watts_numeric'].idxmax()
+                if 'max_watts' in df_ride.columns:
+                    df_ride['max_watts_numeric'] = pd.to_numeric(df_ride['max_watts'], errors='coerce')
+                    if not df_ride['max_watts_numeric'].isna().all():
+                        max_pwr_idx = df_ride['max_watts_numeric'].idxmax()
                         if pd.notna(max_pwr_idx):
-                            max_pwr = df.loc[max_pwr_idx]
+                            max_pwr = df_ride.loc[max_pwr_idx]
                             col5.metric("Highest Max Power", f"{max_pwr['max_watts_numeric']:.0f} W", f"{max_pwr.get('name', 'Activity')}")
                         
                 st.markdown("---")
@@ -264,8 +307,11 @@ def main():
             with open(global_records_path, 'r') as f:
                 records = json.load(f)
                 
-            st.markdown("### All-Time Best Power")
-            power_recs = records.get('power', {})
+            record_key = "all_time" if selected_timescale == "All Time" else selected_timescale
+            year_records = records.get(record_key, {})
+                
+            st.markdown(f"### {selected_timescale} Best Power")
+            power_recs = year_records.get('power', {})
             if power_recs:
                 # Group by rows of 4
                 durations = list(power_recs.keys())
@@ -276,9 +322,12 @@ def main():
                             dur = durations[i+j]
                             rec = power_recs[dur]
                             cols[j].metric(label=f"Best {dur} Power", value=f"{rec['value']} W", delta=rec['activity_name'], delta_color="off")
-                            
-            st.markdown("### All-Time Fastest Distances")
-            dist_recs = records.get('distance', {})
+                            if cols[j].button(f"View Ride", key=f"btn_pwr_{selected_timescale}_{dur}"):
+                                st.session_state.page_selector = "Single Route"
+                                st.session_state.selected_activity_id = str(rec['activity_id'])
+                                st.rerun()
+            st.markdown(f"### {selected_timescale} Fastest Distances")
+            dist_recs = year_records.get('distance', {})
             if dist_recs:
                 durations = list(dist_recs.keys())
                 for i in range(0, len(durations), 3):
@@ -297,7 +346,10 @@ def main():
                             else:
                                 time_str = f"{int(minutes):02d}:{int(seconds):02d}"
                             cols[j].metric(label=f"Fastest {dur}", value=time_str, delta=rec['activity_name'], delta_color="off")
-                            
+                            if cols[j].button(f"View Ride", key=f"btn_dist_{selected_timescale}_{dur}"):
+                                st.session_state.page_selector = "Single Route"
+                                st.session_state.selected_activity_id = str(rec['activity_id'])
+                                st.rerun()
         else:
             st.warning("No detailed records found. Please click 'Scan All Activities' to generate them.")
             

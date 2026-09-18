@@ -119,12 +119,51 @@ def scan_global_records(activities_csv_path, output_json_path):
     if 'local_raw_path' not in df.columns:
         return False
         
-    global_power_records = {}
-    global_distance_records = {}
+    global_records = {}
+    scanned_activities = []
+    
+    if os.path.exists(output_json_path):
+        try:
+            with open(output_json_path, 'r') as f:
+                existing = json.load(f)
+                if 'all_time' in existing:
+                    global_records = existing
+                    scanned_activities = existing.get('scanned_activities', [])
+        except:
+            pass
+            
+    if 'all_time' not in global_records:
+        global_records = {'all_time': {'power': {}, 'distance': {}}}
+        scanned_activities = []
+        
+    scanned_set = set(scanned_activities)
+    
+    import streamlit as st
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    total_files = len(df)
     
     for idx, row in df.iterrows():
+        # Update progress
+        progress_bar.progress((idx + 1) / total_files)
+        status_text.text(f"Processing activity {idx + 1} of {total_files}...")
         raw_path = row['local_raw_path']
+        activity_id = str(row.get('id', ''))
+        
+        year = None
+        if 'activity_date' in row and pd.notna(row['activity_date']):
+            try:
+                year = str(pd.to_datetime(row['activity_date']).year)
+            except:
+                pass
+                
+        if year and year not in global_records:
+            global_records[year] = {'power': {}, 'distance': {}}
+            
         if pd.isna(raw_path) or not os.path.exists(str(raw_path)):
+            continue
+            
+        if activity_id in scanned_set:
             continue
             
         if str(raw_path).endswith('.fit') or str(raw_path).endswith('.fit.gz'):
@@ -134,31 +173,50 @@ def scan_global_records(activities_csv_path, output_json_path):
                 p_recs = get_power_records(stream_df)
                 for dur, val in p_recs.items():
                     if val is not None:
-                        if dur not in global_power_records or val > global_power_records[dur]['value']:
-                            global_power_records[dur] = {
+                        # all_time
+                        if dur not in global_records['all_time']['power'] or val > global_records['all_time']['power'][dur]['value']:
+                            global_records['all_time']['power'][dur] = {
                                 'value': val,
                                 'activity_name': row.get('name', 'Unnamed Activity'),
                                 'activity_id': str(row.get('id', ''))
                             }
+                        # year
+                        if year:
+                            if dur not in global_records[year]['power'] or val > global_records[year]['power'][dur]['value']:
+                                global_records[year]['power'][dur] = {
+                                    'value': val,
+                                    'activity_name': row.get('name', 'Unnamed Activity'),
+                                    'activity_id': str(row.get('id', ''))
+                                }
                 
                 # Distance
                 d_recs = get_distance_records(stream_df)
                 for dur, val in d_recs.items():
                     if val is not None:
-                        if dur not in global_distance_records or val < global_distance_records[dur]['value']:
-                            global_distance_records[dur] = {
+                        # all_time
+                        if dur not in global_records['all_time']['distance'] or val < global_records['all_time']['distance'][dur]['value']:
+                            global_records['all_time']['distance'][dur] = {
                                 'value': val,
                                 'activity_name': row.get('name', 'Unnamed Activity'),
                                 'activity_id': str(row.get('id', ''))
                             }
-                            
-    final_records = {
-        'power': global_power_records,
-        'distance': global_distance_records
-    }
+                        # year
+                        if year:
+                            if dur not in global_records[year]['distance'] or val < global_records[year]['distance'][dur]['value']:
+                                global_records[year]['distance'][dur] = {
+                                    'value': val,
+                                    'activity_name': row.get('name', 'Unnamed Activity'),
+                                    'activity_id': str(row.get('id', ''))
+                                }
+        scanned_set.add(activity_id)
+                             
+    global_records['scanned_activities'] = list(scanned_set)
     
+    status_text.text("Saving records...")
     os.makedirs(os.path.dirname(output_json_path), exist_ok=True)
     with open(output_json_path, 'w') as f:
-        json.dump(final_records, f, indent=4)
+        json.dump(global_records, f, indent=4)
         
+    progress_bar.empty()
+    status_text.empty()
     return True
