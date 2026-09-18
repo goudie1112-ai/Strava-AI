@@ -67,10 +67,11 @@ def plot_hr_zones(activity_data, stream_df=None):
     time_in_zones = [10, 40, 30, 15, 5] 
     
     fig = px.bar(
-        x=zones, 
-        y=time_in_zones, 
-        labels={'x': 'Heart Rate Zone', 'y': 'Estimated % of Time'},
-        title=f"HR Distribution (Avg: {avg_hr:.0f} bpm | Max: {max_hr:.0f} bpm)",
+        x=time_in_zones, 
+        y=zones, 
+        orientation='h',
+        labels={'y': 'Heart Rate Zone', 'x': 'Estimated % of Time'},
+        title=f"HR Distribution<br>(Avg: {avg_hr:.0f} | Max: {max_hr:.0f})",
         color=zones,
         color_discrete_sequence=['#00ffff', '#00ffaa', '#ffff00', '#ffaa00', '#ff0044'],
         template='plotly_dark'
@@ -79,7 +80,8 @@ def plot_hr_zones(activity_data, stream_df=None):
         showlegend=False,
         plot_bgcolor='rgba(0,0,0,0)',
         paper_bgcolor='rgba(0,0,0,0)',
-        font=dict(family="monospace", color="#00ffcc")
+        font=dict(family="monospace", color="#00ffcc"),
+        margin=dict(l=0, r=0, t=50, b=0)
     )
     return fig
 
@@ -95,19 +97,20 @@ def plot_power_curve(activity_data, stream_df=None):
     if pd.isna(max_power): max_power = avg_power * 3
     
     # Simulated power curve data
-    durations = [1, 5, 10, 30, 60, 300, 600, 1200, 3600]
-    duration_labels = ['1s', '5s', '10s', '30s', '1m', '5m', '10m', '20m', '1h']
+    durations = [1, 5, 10, 15, 30, 60, 120, 180, 300, 600, 1200, 1800, 3600, 7200]
+    duration_labels = ['1s', '5s', '10s', '15s', '30s', '1m', '2m', '3m', '5m', '10m', '20m', '30m', '1h', '2h']
     
     # Simulated exponential decay for the curve
-    powers = [max_power * (0.95 ** i) for i in range(len(durations))]
-    # Ensure 1h is close to average power
+    powers = [max_power * (0.92 ** i) for i in range(len(durations))]
+    # Ensure 1h and 2h are close to average power
+    powers[-2] = avg_power * 1.1
     powers[-1] = avg_power
     
     fig = px.line(
         x=duration_labels, 
         y=powers, 
         labels={'x': 'Duration', 'y': 'Power (Watts)'},
-        title=f"Estimated Power Curve (Avg: {avg_power:.0f}W | Max: {max_power:.0f}W)",
+        title=f"Est. Power Curve<br>(Avg: {avg_power:.0f}W | Max: {max_power:.0f}W)",
         markers=True,
         template='plotly_dark'
     )
@@ -121,7 +124,38 @@ def plot_power_curve(activity_data, stream_df=None):
         paper_bgcolor='rgba(0,0,0,0)',
         font=dict(family="monospace", color="#00ffcc"),
         xaxis=dict(showgrid=True, gridcolor='#333333'),
-        yaxis=dict(showgrid=True, gridcolor='#333333')
+        yaxis=dict(showgrid=True, gridcolor='#333333'),
+        margin=dict(l=0, r=0, t=50, b=0)
+    )
+    return fig
+
+def plot_power_zones(activity_data, stream_df=None):
+    """
+    Plots Power Zones as a horizontal bar chart.
+    """
+    avg_power = activity_data.get('average_watts')
+    if pd.isna(avg_power):
+        return None
+        
+    zones = ['Z1 (Active Recovery)', 'Z2 (Endurance)', 'Z3 (Tempo)', 'Z4 (Lactate Threshold)', 'Z5 (VO2 Max)', 'Z6 (Anaerobic Capacity)', 'Z7 (Neuromuscular)']
+    time_in_zones = [15, 30, 20, 20, 10, 3, 2] # Simulated distribution
+    
+    fig = px.bar(
+        x=time_in_zones, 
+        y=zones, 
+        orientation='h',
+        labels={'y': 'Power Zone', 'x': 'Estimated % of Time'},
+        title=f"Power Zones<br>(Avg: {avg_power:.0f}W)",
+        color=zones,
+        color_discrete_sequence=['#555555', '#00ccff', '#00ffcc', '#ffff00', '#ffaa00', '#ff0044', '#cc00ff'],
+        template='plotly_dark'
+    )
+    fig.update_layout(
+        showlegend=False,
+        plot_bgcolor='rgba(0,0,0,0)',
+        paper_bgcolor='rgba(0,0,0,0)',
+        font=dict(family="monospace", color="#00ffcc"),
+        margin=dict(l=0, r=0, t=50, b=0)
     )
     return fig
 
@@ -202,5 +236,22 @@ def plot_cadence(activity_data, stream_df=None):
     if pd.notna(avg_cad):
         fig = go.Figure(go.Indicator(mode="number", value=avg_cad, title={"text": "Avg Cadence"}))
         fig.update_layout(template="plotly_dark", plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font=dict(family="monospace", color="#00ffcc"))
+        return fig
+    return None
+
+def plot_hr_curve(activity_data, stream_df=None):
+    if stream_df is not None and not stream_df.empty and 'heart_rate' in stream_df.columns:
+        fig = px.line(
+            x=stream_df.index, 
+            y=stream_df['heart_rate'], 
+            labels={'x': 'Time', 'y': 'Heart Rate (bpm)'},
+            title="Heart Rate Over Time",
+            template='plotly_dark'
+        )
+        fig.update_traces(line_color='#ff0044')
+        fig.update_layout(
+            plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+            font=dict(family="monospace", color="#00ffcc"), margin=dict(l=0, r=0, t=50, b=0)
+        )
         return fig
     return None

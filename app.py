@@ -4,18 +4,25 @@ import os
 
 st.set_page_config(page_title="Strava AI Analyzer", page_icon="🚴‍♂️", layout="wide")
 
-from src.visualizations import plot_route, plot_hr_zones, plot_power_curve, plot_pedal_dynamics, plot_speed, plot_elevation, plot_cadence
+from src.visualizations import plot_route, plot_hr_zones, plot_hr_curve, plot_power_curve, plot_power_zones, plot_pedal_dynamics, plot_speed, plot_elevation, plot_cadence
 from src.data_processing import process_zip_export, parse_fit_file
 from src.trends import plot_weekly_distance, plot_weekly_elevation
 from src.records import get_power_records
 from src.ai_insights import get_ai_coaching
 
+import base64
+
 def render_header(icon_path, title):
-    col1, col2 = st.columns([1, 10])
-    with col1:
-        if os.path.exists(icon_path):
-            st.image(icon_path, width=40)
-    with col2:
+    if os.path.exists(icon_path):
+        with open(icon_path, "rb") as f:
+            encoded = base64.b64encode(f.read()).decode()
+        st.markdown(f'''
+            <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 10px;">
+                <img src="data:image/jpeg;base64,{encoded}" width="45" style="border-radius: 8px; box-shadow: 0 0 10px rgba(0,255,204,0.3);">
+                <h3 style="margin: 0; padding: 0;">{title}</h3>
+            </div>
+        ''', unsafe_allow_html=True)
+    else:
         st.markdown(f"### {title}")
 
 def main():
@@ -25,12 +32,12 @@ def main():
     st.title("Strava AI Local Analyzer")
     st.sidebar.title("Navigation")
     
-    page = st.sidebar.radio("Go to", ["Dashboard", "Trends", "Personal Records", "AI Coach", "Upload Data"])
+    page = st.sidebar.radio("Go to", ["Single Route", "Trends", "Personal Records", "AI Coach", "Upload Data"])
     
     data_path = "data/processed_activities.csv"
     
-    if page == "Dashboard":
-        st.header("Activity Dashboard")
+    if page == "Single Route":
+        st.header("Single Route")
         if os.path.exists(data_path):
             df = pd.read_csv(data_path)
             
@@ -56,71 +63,85 @@ def main():
                         if stream_df is not None and not stream_df.empty:
                             st.success(f"High-res data loaded: {os.path.basename(str(raw_path))} ({len(stream_df)} points)")
                 
+                render_header("Icons/Routes_icon.jpeg", "Route Map")
+                map_obj = None
+                if stream_df is not None and not stream_df.empty and 'position_lat' in stream_df.columns and 'position_long' in stream_df.columns:
+                    coords = []
+                    for _, row in stream_df.dropna(subset=['position_lat', 'position_long']).iterrows():
+                        lat = row['position_lat'] * (180.0 / (2**31))
+                        lon = row['position_long'] * (180.0 / (2**31))
+                        coords.append([lat, lon])
+                    from src.visualizations import plot_route_from_coords
+                    map_obj = plot_route_from_coords(coords)
+                
+                if map_obj:
+                    st.components.v1.html(map_obj._repr_html_(), height=400)
+                else:
+                    st.info("No route data available.")
+                    
                 col1, col2 = st.columns(2)
                 with col1:
-                    render_header("Icons/Routes_icon.jpeg", "Route Map")
-                    map_obj = None
-                    if stream_df is not None and not stream_df.empty and 'position_lat' in stream_df.columns and 'position_long' in stream_df.columns:
-                        coords = []
-                        for _, row in stream_df.dropna(subset=['position_lat', 'position_long']).iterrows():
-                            lat = row['position_lat'] * (180.0 / (2**31))
-                            lon = row['position_long'] * (180.0 / (2**31))
-                            coords.append([lat, lon])
-                        from src.visualizations import plot_route_from_coords
-                        map_obj = plot_route_from_coords(coords)
-                    
-                    if map_obj:
-                        st.components.v1.html(map_obj._repr_html_(), height=400)
-                    else:
-                        st.info("No route data available.")
-                with col2:
                     render_header("Icons/Speed_icon.jpeg", "Speed")
                     fig_speed = plot_speed(activity_data, stream_df)
                     if fig_speed:
                         st.plotly_chart(fig_speed, use_container_width=True)
                     else:
                         st.info("No Speed data available.")
-                        
-                col3, col4 = st.columns(2)
-                with col3:
-                    st.markdown("### HR Zones")
-                    fig_hr = plot_hr_zones(activity_data, stream_df)
-                    if fig_hr:
-                        st.plotly_chart(fig_hr, use_container_width=True)
-                    else:
-                        st.info("No HR data available.")
-                with col4:
-                    st.markdown("### Power Curve & Zones")
-                    fig_power = plot_power_curve(activity_data, stream_df)
-                    if fig_power:
-                        st.plotly_chart(fig_power, use_container_width=True)
-                    else:
-                        st.info("No Power data available.")
-                        
-                col5, col6 = st.columns(2)
-                with col5:
-                    render_header("Icons/Pedal_metrics_icon.jpeg", "Pedal Dynamics")
-                    fig_pedal = plot_pedal_dynamics(activity_data)
-                    if fig_pedal:
-                        st.plotly_chart(fig_pedal, use_container_width=True)
-                    else:
-                        st.info("No Pedal Dynamics data available.")
-                        
-                col7, col8 = st.columns(2)
-                with col7:
+                with col2:
                     render_header("Icons/Elevation_icon.jpeg", "Elevation")
                     fig_elev = plot_elevation(activity_data, stream_df)
                     if fig_elev:
                         st.plotly_chart(fig_elev, use_container_width=True)
                     else:
                         st.info("No Elevation data available.")
+                        
+                col3, col4 = st.columns(2)
+                with col3:
+                    render_header("Icons/Power_icon.jpeg", "Power Curve")
+                    fig_power = plot_power_curve(activity_data, stream_df)
+                    if fig_power:
+                        st.plotly_chart(fig_power, use_container_width=True)
+                    else:
+                        st.info("No Power Curve data available.")
+                with col4:
+                    render_header("Icons/Power_icon.jpeg", "Power Zones")
+                    fig_power_zones = plot_power_zones(activity_data, stream_df)
+                    if fig_power_zones:
+                        st.plotly_chart(fig_power_zones, use_container_width=True)
+                    else:
+                        st.info("No Power Zones data available.")
+                        
+                col5, col6 = st.columns(2)
+                with col5:
+                    render_header("Icons/Heart_rate_icon.jpeg", "Heart Rate")
+                    fig_hr_curve = plot_hr_curve(activity_data, stream_df)
+                    if fig_hr_curve:
+                        st.plotly_chart(fig_hr_curve, use_container_width=True)
+                    else:
+                        st.info("No Heart Rate over time data available.")
+                with col6:
+                    render_header("Icons/Heart_rate_icon.jpeg", "HR Zones")
+                    fig_hr = plot_hr_zones(activity_data, stream_df)
+                    if fig_hr:
+                        st.plotly_chart(fig_hr, use_container_width=True)
+                    else:
+                        st.info("No HR Zones data available.")
+                        
+                col7, col8 = st.columns(2)
+                with col7:
+                    render_header("Icons/Pedal_metrics_icon.jpeg", "Pedal Dynamics")
+                    fig_pedal = plot_pedal_dynamics(activity_data)
+                    if fig_pedal:
+                        st.plotly_chart(fig_pedal, use_container_width=True)
+                    else:
+                        st.info("No Pedal Dynamics data available.")
                 with col8:
                     render_header("Icons/Cadence_icon.jpeg", "Cadence")
                     fig_cad = plot_cadence(activity_data, stream_df)
                     if fig_cad:
                         st.plotly_chart(fig_cad, use_container_width=True)
                     else:
-                        st.info("No Cadence data available.")
+                        st.info("No Cadence data available for this activity.")
 
         else:
             st.warning("No data found. Please go to 'Upload Data'.")
@@ -129,6 +150,17 @@ def main():
         st.header("Aggregated Trends")
         if os.path.exists(data_path):
             df = pd.read_csv(data_path)
+            
+            timescale = st.selectbox("Timescale", ["All Time", "Last 30 Days", "Last 6 Months", "Last Year"])
+            df['date'] = pd.to_datetime(df['activity_date'], errors='coerce')
+            now = pd.Timestamp.now()
+            if timescale == "Last 30 Days":
+                df = df[df['date'] >= now - pd.DateOffset(days=30)]
+            elif timescale == "Last 6 Months":
+                df = df[df['date'] >= now - pd.DateOffset(months=6)]
+            elif timescale == "Last Year":
+                df = df[df['date'] >= now - pd.DateOffset(years=1)]
+                
             col1, col2 = st.columns(2)
             with col1:
                 fig1 = plot_weekly_distance(df)
@@ -159,7 +191,8 @@ def main():
         if os.path.exists(data_path):
             df = pd.read_csv(data_path)
             # Create a mock weekly summary text from the dataframe
-            summary_text = f"Total Activities: {len(df)}. Total distance: {df['distance'].sum() * 0.000621371:.0f} miles."
+            distance_sum = pd.to_numeric(df['distance'], errors='coerce').sum()
+            summary_text = f"Total Activities: {len(df)}. Total distance: {distance_sum * 0.000621371:.0f} miles."
             
             api_key_input = st.text_input("Enter Gemini API Key (or set GEMINI_API_KEY env var)", type="password")
             if api_key_input:
