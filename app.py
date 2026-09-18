@@ -43,6 +43,9 @@ def main():
         st.image("Icons/App_Header.jpeg", use_container_width=True)
         
     st.title("Strava AI Local Analyzer")
+    if os.path.exists("Icons/LLM_App_Icon.jpeg"):
+        st.sidebar.image("Icons/LLM_App_Icon.jpeg", use_container_width=True)
+        
     st.sidebar.title("Navigation")
     
     page = st.sidebar.radio("Go to", ["Single Route", "Trends", "Personal Records", "AI Coach", "Data & Sync"])
@@ -200,7 +203,7 @@ def main():
                         max_dist_idx = df['distance_numeric'].idxmax()
                         if pd.notna(max_dist_idx):
                             max_dist = df.loc[max_dist_idx]
-                            col1.metric("Longest Ride", f"{max_dist['distance_numeric']*0.000621371:.2f} mi", f"{max_dist.get('name', 'Activity')}")
+                            col1.metric("Longest Ride", f"{max_dist['distance_numeric']*0.001:.2f} km", f"{max_dist.get('name', 'Activity')}")
                 
                 # Elevation
                 if 'elevation_gain' in df.columns:
@@ -209,7 +212,7 @@ def main():
                         max_elev_idx = df['elevation_numeric'].idxmax()
                         if pd.notna(max_elev_idx):
                             max_elev = df.loc[max_elev_idx]
-                            col2.metric("Most Elevation Gain", f"{max_elev['elevation_numeric']*3.28084:.0f} ft", f"{max_elev.get('name', 'Activity')}")
+                            col2.metric("Most Elevation Gain", f"{max_elev['elevation_numeric']:.0f} m", f"{max_elev.get('name', 'Activity')}")
                 
                 # Speed
                 if 'max_speed' in df.columns:
@@ -218,7 +221,7 @@ def main():
                         max_speed_idx = df['max_speed_numeric'].idxmax()
                         if pd.notna(max_speed_idx):
                             max_speed = df.loc[max_speed_idx]
-                            col3.metric("Highest Max Speed", f"{max_speed['max_speed_numeric']*2.23694:.1f} mph", f"{max_speed.get('name', 'Activity')}")
+                            col3.metric("Highest Max Speed", f"{max_speed['max_speed_numeric']*3.6:.1f} km/h", f"{max_speed.get('name', 'Activity')}")
                         
                 col4, col5, col6 = st.columns(3)
                 

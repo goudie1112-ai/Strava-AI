@@ -197,30 +197,30 @@ def plot_pedal_dynamics(activity_data):
 
 def plot_speed(activity_data, stream_df=None):
     if stream_df is not None and not stream_df.empty and 'enhanced_speed' in stream_df.columns:
-        speed_mph = stream_df['enhanced_speed'] * 2.23694
-        fig = px.line(x=stream_df.index, y=speed_mph, title="Speed Profile (mph)", template="plotly_dark")
+        speed_kmh = stream_df['enhanced_speed'] * 3.6
+        fig = px.line(x=stream_df.index, y=speed_kmh, title="Speed Profile (km/h)", template="plotly_dark")
         fig.update_traces(line_color='#ff00aa')
-        fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font=dict(family="monospace", color="#00ffcc"), xaxis_title="Time", yaxis_title="Speed (mph)")
+        fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font=dict(family="monospace", color="#00ffcc"), xaxis_title="Time", yaxis_title="Speed (km/h)")
         return fig
     
     avg_speed = activity_data.get('average_speed')
     if pd.notna(avg_speed):
-        fig = go.Figure(go.Indicator(mode="number", value=avg_speed * 2.23694, title={"text": "Avg Speed (mph)"}))
+        fig = go.Figure(go.Indicator(mode="number", value=avg_speed * 3.6, title={"text": "Avg Speed (km/h)"}))
         fig.update_layout(template="plotly_dark", plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font=dict(family="monospace", color="#00ffcc"))
         return fig
     return None
 
 def plot_elevation(activity_data, stream_df=None):
     if stream_df is not None and not stream_df.empty and 'enhanced_altitude' in stream_df.columns:
-        alt_ft = stream_df['enhanced_altitude'] * 3.28084
-        fig = px.area(x=stream_df.index, y=alt_ft, title="Elevation Profile (ft)", template="plotly_dark")
+        alt_m = stream_df['enhanced_altitude']
+        fig = px.area(x=stream_df.index, y=alt_m, title="Elevation Profile (m)", template="plotly_dark")
         fig.update_traces(line_color='#aaff00', fillcolor='rgba(170, 255, 0, 0.2)')
-        fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font=dict(family="monospace", color="#00ffcc"), xaxis_title="Time", yaxis_title="Elevation (ft)")
+        fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font=dict(family="monospace", color="#00ffcc"), xaxis_title="Time", yaxis_title="Elevation (m)")
         return fig
         
     elev = activity_data.get('elevation_gain')
     if pd.notna(elev):
-        fig = go.Figure(go.Indicator(mode="number", value=elev * 3.28084, title={"text": "Total Elevation (ft)"}))
+        fig = go.Figure(go.Indicator(mode="number", value=elev, title={"text": "Total Elevation (m)"}))
         fig.update_layout(template="plotly_dark", plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font=dict(family="monospace", color="#00ffcc"))
         return fig
     return None
