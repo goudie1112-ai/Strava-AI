@@ -173,7 +173,121 @@ def main():
             
     elif page == "Personal Records":
         st.header("Personal Records")
-        st.info("Upload a .fit file to extract power records.")
+        if os.path.exists(data_path):
+            df = pd.read_csv(data_path)
+            if not df.empty:
+                st.subheader("All-Time Highs (from Activity Summaries)")
+                
+                col1, col2, col3 = st.columns(3)
+                
+                # Distance
+                if 'distance' in df.columns:
+                    df['distance_numeric'] = pd.to_numeric(df['distance'], errors='coerce')
+                    if not df['distance_numeric'].isna().all():
+                        max_dist_idx = df['distance_numeric'].idxmax()
+                        if pd.notna(max_dist_idx):
+                            max_dist = df.loc[max_dist_idx]
+                            col1.metric("Longest Ride", f"{max_dist['distance_numeric']*0.000621371:.2f} mi", f"{max_dist.get('name', 'Activity')}")
+                
+                # Elevation
+                if 'elevation_gain' in df.columns:
+                    df['elevation_numeric'] = pd.to_numeric(df['elevation_gain'], errors='coerce')
+                    if not df['elevation_numeric'].isna().all():
+                        max_elev_idx = df['elevation_numeric'].idxmax()
+                        if pd.notna(max_elev_idx):
+                            max_elev = df.loc[max_elev_idx]
+                            col2.metric("Most Elevation Gain", f"{max_elev['elevation_numeric']*3.28084:.0f} ft", f"{max_elev.get('name', 'Activity')}")
+                
+                # Speed
+                if 'max_speed' in df.columns:
+                    df['max_speed_numeric'] = pd.to_numeric(df['max_speed'], errors='coerce')
+                    if not df['max_speed_numeric'].isna().all():
+                        max_speed_idx = df['max_speed_numeric'].idxmax()
+                        if pd.notna(max_speed_idx):
+                            max_speed = df.loc[max_speed_idx]
+                            col3.metric("Highest Max Speed", f"{max_speed['max_speed_numeric']*2.23694:.1f} mph", f"{max_speed.get('name', 'Activity')}")
+                        
+                col4, col5, col6 = st.columns(3)
+                
+                # Avg Power
+                if 'average_watts' in df.columns:
+                    df['avg_watts_numeric'] = pd.to_numeric(df['average_watts'], errors='coerce')
+                    if not df['avg_watts_numeric'].isna().all():
+                        max_avg_power_idx = df['avg_watts_numeric'].idxmax()
+                        if pd.notna(max_avg_power_idx):
+                            max_avg_power = df.loc[max_avg_power_idx]
+                            col4.metric("Highest Avg Power", f"{max_avg_power['avg_watts_numeric']:.0f} W", f"{max_avg_power.get('name', 'Activity')}")
+                        
+                # Max Power
+                if 'max_watts' in df.columns:
+                    df['max_watts_numeric'] = pd.to_numeric(df['max_watts'], errors='coerce')
+                    if not df['max_watts_numeric'].isna().all():
+                        max_pwr_idx = df['max_watts_numeric'].idxmax()
+                        if pd.notna(max_pwr_idx):
+                            max_pwr = df.loc[max_pwr_idx]
+                            col5.metric("Highest Max Power", f"{max_pwr['max_watts_numeric']:.0f} W", f"{max_pwr.get('name', 'Activity')}")
+                        
+                st.markdown("---")
+                
+        st.subheader("Detailed Power Curve & Distance Records")
+        st.info("These records are calculated by scanning your high-resolution .fit files.")
+        
+        global_records_path = "data/global_records.json"
+        
+        if st.button("Scan All Activities for Records (Takes a few minutes)"):
+            from src.data_processing import scan_global_records
+            with st.spinner("Scanning all local .fit files... Please wait."):
+                success = scan_global_records(data_path, global_records_path)
+                if success:
+                    st.success("Global records calculated and saved!")
+                else:
+                    st.error("Failed to scan records. Make sure activities have been uploaded.")
+                    
+        if os.path.exists(global_records_path):
+            import json
+            with open(global_records_path, 'r') as f:
+                records = json.load(f)
+                
+            st.markdown("### All-Time Best Power")
+            power_recs = records.get('power', {})
+            if power_recs:
+                # Group by rows of 4
+                durations = list(power_recs.keys())
+                for i in range(0, len(durations), 4):
+                    cols = st.columns(4)
+                    for j in range(4):
+                        if i + j < len(durations):
+                            dur = durations[i+j]
+                            rec = power_recs[dur]
+                            cols[j].metric(label=f"Best {dur} Power", value=f"{rec['value']} W", delta=rec['activity_name'], delta_color="off")
+                            
+            st.markdown("### All-Time Fastest Distances")
+            dist_recs = records.get('distance', {})
+            if dist_recs:
+                durations = list(dist_recs.keys())
+                for i in range(0, len(durations), 3):
+                    cols = st.columns(3)
+                    for j in range(3):
+                        if i + j < len(durations):
+                            dur = durations[i+j]
+                            rec = dist_recs[dur]
+                            # Format time nicely: HH:MM:SS
+                            total_seconds = rec['value']
+                            hours = total_seconds // 3600
+                            minutes = (total_seconds % 3600) // 60
+                            seconds = total_seconds % 60
+                            if hours > 0:
+                                time_str = f"{int(hours):02d}:{int(minutes):02d}:{int(seconds):02d}"
+                            else:
+                                time_str = f"{int(minutes):02d}:{int(seconds):02d}"
+                            cols[j].metric(label=f"Fastest {dur}", value=time_str, delta=rec['activity_name'], delta_color="off")
+                            
+        else:
+            st.warning("No detailed records found. Please click 'Scan All Activities' to generate them.")
+            
+        st.markdown("---")
+        st.subheader("Analyze Specific Ride")
+        st.info("Upload a specific .fit file to extract exact power curve records for that ride.")
         fit_file = st.file_uploader("Upload .fit file", type=["fit"])
         if fit_file:
             # Save temp
@@ -181,8 +295,9 @@ def main():
                 f.write(fit_file.getbuffer())
             stream_df = parse_fit_file("temp.fit")
             if not stream_df.empty:
-                records = get_power_records(stream_df)
-                for duration, power in records.items():
+                from src.records import get_power_records
+                ride_records = get_power_records(stream_df)
+                for duration, power in ride_records.items():
                     st.metric(label=f"Best {duration} Power", value=f"{power} W" if power else "N/A")
             os.remove("temp.fit")
             

@@ -61,33 +61,104 @@ def process_zip_export(uploaded_zip):
     """
     extract_dir = "data/raw"
     os.makedirs(extract_dir, exist_ok=True)
+    import shutil
+    extracted_paths = []
     
     with zipfile.ZipFile(uploaded_zip, 'r') as zip_ref:
-        zip_ref.extractall(extract_dir)
-        
-    # Find activities.csv
-    activities_csv = os.path.join(extract_dir, "activities.csv")
-    if os.path.exists(activities_csv):
-        df = pd.read_csv(activities_csv)
-        df.columns = [c.strip().lower().replace(' ', '_') for c in df.columns]
-        if 'activity_id' in df.columns and 'id' not in df.columns:
-            df['id'] = df['activity_id']
-        if 'activity_name' in df.columns and 'name' not in df.columns:
-            df['name'] = df['activity_name']
-            
-        # Optional: Add a column for local raw file path if it exists
-        def get_raw_file(filename):
-            if pd.isna(filename):
-                return None
-            path = os.path.join(extract_dir, filename)
-            # Sometimes strava appends .gz, we'd need to unzip. 
-            # For this demo we just store the path
-            return path if os.path.exists(path) else None
-            
-        if 'filename' in df.columns:
-            df['local_raw_path'] = df['filename'].apply(get_raw_file)
-            
-        return df
-    else:
-        st.error("Could not find activities.csv in the zip file.")
+        for member in zip_ref.namelist():
+            if member.startswith('activities/') and (member.endswith('.fit.gz') or member.endswith('.fit') or member.endswith('.gpx') or member.endswith('.tcx')):
+                source = zip_ref.open(member)
+                target_filename = os.path.basename(member)
+                target_path = os.path.join(extract_dir, target_filename)
+                with open(target_path, "wb") as target:
+                    shutil.copyfileobj(source, target)
+                extracted_paths.append(target_path)
+    
+    # Process activities.csv
+    try:
+        with zipfile.ZipFile(uploaded_zip, 'r') as zip_ref:
+            with zip_ref.open('activities.csv') as f:
+                df = pd.read_csv(f)
+                df.columns = [c.strip().lower().replace(' ', '_') for c in df.columns]
+                if 'activity_id' in df.columns and 'id' not in df.columns:
+                    df['id'] = df['activity_id']
+                if 'activity_name' in df.columns and 'name' not in df.columns:
+                    df['name'] = df['activity_name']
+                
+                # Match local paths
+                def match_local_path(filename):
+                    if pd.isna(filename): return None
+                    base = os.path.basename(filename)
+                    for path in extracted_paths:
+                        if base in path:
+                            return path
+                    return None
+                    
+                if 'filename' in df.columns:
+                    df['local_raw_path'] = df['filename'].apply(match_local_path)
+                
+                os.makedirs('data', exist_ok=True)
+                df.to_csv('data/processed_activities.csv', index=False)
+                return df
+    except Exception as e:
+        st.error(f"Error processing CSV inside zip: {e}")
         return pd.DataFrame()
+
+def scan_global_records(activities_csv_path, output_json_path):
+    """
+    Scans all local raw fit files and calculates absolute best power and distance records.
+    Saves to JSON.
+    """
+    import json
+    from src.records import get_power_records, get_distance_records
+    
+    if not os.path.exists(activities_csv_path):
+        return False
+        
+    df = pd.read_csv(activities_csv_path)
+    if 'local_raw_path' not in df.columns:
+        return False
+        
+    global_power_records = {}
+    global_distance_records = {}
+    
+    for idx, row in df.iterrows():
+        raw_path = row['local_raw_path']
+        if pd.isna(raw_path) or not os.path.exists(str(raw_path)):
+            continue
+            
+        if str(raw_path).endswith('.fit') or str(raw_path).endswith('.fit.gz'):
+            stream_df = parse_fit_file(str(raw_path))
+            if stream_df is not None and not stream_df.empty:
+                # Power
+                p_recs = get_power_records(stream_df)
+                for dur, val in p_recs.items():
+                    if val is not None:
+                        if dur not in global_power_records or val > global_power_records[dur]['value']:
+                            global_power_records[dur] = {
+                                'value': val,
+                                'activity_name': row.get('name', 'Unnamed Activity'),
+                                'activity_id': str(row.get('id', ''))
+                            }
+                
+                # Distance
+                d_recs = get_distance_records(stream_df)
+                for dur, val in d_recs.items():
+                    if val is not None:
+                        if dur not in global_distance_records or val < global_distance_records[dur]['value']:
+                            global_distance_records[dur] = {
+                                'value': val,
+                                'activity_name': row.get('name', 'Unnamed Activity'),
+                                'activity_id': str(row.get('id', ''))
+                            }
+                            
+    final_records = {
+        'power': global_power_records,
+        'distance': global_distance_records
+    }
+    
+    os.makedirs(os.path.dirname(output_json_path), exist_ok=True)
+    with open(output_json_path, 'w') as f:
+        json.dump(final_records, f, indent=4)
+        
+    return True
